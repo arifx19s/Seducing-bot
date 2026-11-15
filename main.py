@@ -1,9 +1,10 @@
 import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InputMediaPhoto, InputMediaVideo
-
-# Bot Initialization (Token is expected from Render environment variables)
+from aiohttp import web
 import os
+
+# --- 1. Telegram Bot Setup ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN is required. Please set it in your environment variables.")
@@ -14,7 +15,7 @@ dp = Dispatcher()
 # Memory Dictionary (To track each user's chat funnel step)
 user_steps = {}
 
-# --- NYRA PERSONA MEMORY (Bot ki identity) ---
+# --- 2. NYRA PERSONA MEMORY (Bot ki identity) ---
 persona_details = {
     "name": "Nyra",
     "age": "24",
@@ -25,7 +26,7 @@ persona_details = {
     "relationship": "Well... maine 22 mein shaadi ki thi, but it didn't work out. I guess I'm too independent for some guys. Abhi I'm single and just focusing on myself. Tumhara kya scene hai? 😉",
 }
 
-# --- KEYWORD DETECTION FUNCTION (For Personal Questions) ---
+# --- 3. KEYWORD DETECTION FUNCTION (For Personal Questions) ---
 def check_personal_question(text):
     text = text.lower()
     
@@ -67,7 +68,7 @@ def check_personal_question(text):
         
     return None
 
-# --- MAIN CHAT HANDLER (For Business Mode and Private Messages) ---
+# --- 4. MAIN CHAT HANDLER (For Business Mode and Private Messages) ---
 @dp.message()
 @dp.business_message()
 async def smart_seducing_funnel(message: types.Message):
@@ -75,17 +76,17 @@ async def smart_seducing_funnel(message: types.Message):
     text = message.text if message.text else ""
     step = user_steps.get(user_id, 0)
     
-    # 1. Natural Human Delay
+    # Natural Human Delay
     await bot.send_chat_action(chat_id=message.chat.id, action="typing")
-    await asyncio.sleep(4) # 4 second delay
+    await asyncio.sleep(4)
     
-    # 2. Check for Specific Keyword Questions First
+    # Check for Specific Keyword Questions First
     custom_reply = check_personal_question(text)
     if custom_reply:
         await message.answer(custom_reply)
         return  # Yahan ruk jayega taake funnel ki agli line na bhej de
 
-    # 3. The Main Sales Funnel (Agar koi general baat ya "hi/hello" ho)
+    # The Main Sales Funnel (Agar koi general baat ya "hi/hello" ho)
     if step == 0:
         await message.answer("Hey there! How are you doing? 😉")
         user_steps[user_id] = 1
@@ -110,31 +111,24 @@ async def smart_seducing_funnel(message: types.Message):
         # Aakhri fallback step / Upsell
         await message.answer("If you want more, I have a special bundle ready for you... unlock my exclusive content first! 💋")
 
-# --- APP STARTUP (Dummy server for Uptime Robot) ---
-async def main():
-    # Polling start karna
-    await dp.start_polling(bot)
+# --- 5. STABLE WEB SERVER (Render aur UptimeRobot ke liye) ---
+async def handle(request):
+    return web.Response(text="Nyra Bot is Live and Awake!")
 
-if __name__ == "__main__":
-    from flask import Flask
-from threading import Thread
+app = web.Application()
+app.router.add_get('/', handle)
 
-# --- Dummy Web Server (Render ke liye zaroori) ---
-app = Flask(__name__)
-@app.route('/')
-def home():
-    return "Nyra Bot is Live!"
-
-def run_web():
-    app.run(host="0.0.0.0", port=10000)
+async def start_web_server():
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 10000)
+    await site.start()
 
 # --- APP STARTUP ---
 async def main():
-    # Web server ko alag thread mein start karein
-    t = Thread(target=run_web)
-    t.start()
-    
-    # Telegram bot start karein
+    # Pehle stable web server start karein 0.0.0.0 par
+    await start_web_server()
+    # Phir Telegram bot start karein
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
