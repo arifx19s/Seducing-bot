@@ -12,10 +12,10 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Memory Dictionary (To track each user's chat funnel step)
+# Memory Dictionary
 user_steps = {}
 
-# --- 2. NYRA PERSONA MEMORY (Bot ki identity) ---
+# --- 2. NYRA PERSONA MEMORY ---
 persona_details = {
     "name": "Nyra",
     "age": "24",
@@ -26,80 +26,61 @@ persona_details = {
     "relationship": "Well... maine 22 mein shaadi ki thi, but it didn't work out. I guess I'm too independent for some guys. Abhi I'm single and just focusing on myself. Tumhara kya scene hai? 😉",
 }
 
-# --- 3. KEYWORD DETECTION FUNCTION (For Personal Questions) ---
+# --- 3. KEYWORD DETECTION FUNCTION ---
 def check_personal_question(text):
     text = text.lower()
-    
-    # Meetup / Date / Video Call Demands
     if any(word in text for word in ["meet", "milna", "milogi", "date", "see you", "video call", "call"]):
         return "I don't just meet guys from the internet right away, baby. I need to know you're real and worth my time first. 😉 Plus, I like keeping some things exclusive online for now. 🔥"
-
-    # Bold/Explicit talk handlers
     if any(word in text for word in ["fuck", "sex", "nudes"]):
         return "Mmm you're bold today 🙈 I like that. But I need to know where you're from first, you keep ignoring me"
-        
-    # Name
     if any(word in text for word in ["nam", "name", "naam", "who are you"]):
         return f"Mera naam {persona_details['name']} hai! Aur tumhara? ❤️"
-        
-    # Age
     if any(word in text for word in ["age", "umar", "old"]):
         return f"Main {persona_details['age']} saal ki hoon. Tum kitne bade ho? 😉"
-        
-    # Location
     if any(word in text for word in ["kaha", "location", "where", "city", "rehti"]):
         return f"Main {persona_details['location']} rehti hoon, it's beautiful here! Tum kahan se ho? ✨"
-        
-    # Background / Parents / Nationality
     if any(word in text for word in ["country", "american", "russian", "mom", "dad", "parents", "background"]):
         return persona_details['background']
-        
-    # Hobbies
     if any(word in text for word in ["hobby", "hobbies", "free time", "shouq"]):
         return persona_details['hobbies']
-        
-    # Profession / Job / Services
     if any(word in text for word in ["work", "job", "profession", "kya karti", "business", "service", "services", "menu"]):
         return f"Heyy Handsome 😘 {persona_details['profession']} As for services, I don't do like a list of stuff lol. What are you looking for? I can't do customs right now but I have something hot for you if you're ready 👀"
-        
-    # Relationship / Marital Status
     if any(word in text for word in ["boyfriend", "single", "relationship", "mingle", "married", "husband", "shaadi", "divorce"]):
         return persona_details['relationship']
-        
     return None
 
-# --- 4. MAIN CHAT HANDLER (For Business Mode and Private Messages) ---
+# --- 4. MAIN CHAT HANDLER ---
 @dp.message()
 @dp.business_message()
 async def smart_seducing_funnel(message: types.Message):
+    # ==== ASAL FIX: Agar direct number par msg nahi aaya (bot profile par aaya hai), toh IGNORE kar do ====
+    if not getattr(message, 'business_connection_id', None):
+        return
+    # =========================================================================================================
+
     user_id = message.from_user.id
     text = message.text if message.text else ""
     step = user_steps.get(user_id, 0)
     
-    # Natural Human Delay
     await bot.send_chat_action(chat_id=message.chat.id, action="typing")
     await asyncio.sleep(4)
     
-    # Check for Specific Keyword Questions First
     custom_reply = check_personal_question(text)
     if custom_reply:
         await message.answer(custom_reply)
-        return  # Yahan ruk jayega taake funnel ki agli line na bhej de
+        return
 
-    # The Main Sales Funnel (Agar koi general baat ya "hi/hello" ho)
     if step == 0:
         await message.answer("Hey there! How are you doing? 😉")
         user_steps[user_id] = 1
         
     elif step == 1:
         await message.answer("Good boy. I've got something waiting for you, don't keep me waiting too long 😈")
-        # Yahan apni FREE TEASER VIDEO ya PHOTO ka direct link lagayen (e.g. from Postimages)
         await message.answer_photo(photo="https://images.pexels.com/photos/1382731/pexels-photo-1382731.jpeg") 
         user_steps[user_id] = 2
         
     elif step == 2:
         await message.answer("I get shy on calls. Here I can be naughty just for u. Like that 🔥")
-        # 600 Stars wali Locked Oiled/Exclusive Video (Replace the media link)
         await bot.send_paid_media(
             chat_id=message.chat.id,
             star_count=600,
@@ -108,10 +89,9 @@ async def smart_seducing_funnel(message: types.Message):
         user_steps[user_id] = 3
         
     else:
-        # Aakhri fallback step / Upsell
-        await message.answer("If you want more, I have a special bundle ready for you... unlock my exclusive content first! 💋")
+        await message.answer("Babe, I'm busy right now. Unlock my exclusive video first if you want more of me... 💋")
 
-# --- 5. STABLE WEB SERVER (Render aur UptimeRobot ke liye) ---
+# --- 5. STABLE WEB SERVER ---
 async def handle(request):
     return web.Response(text="Nyra Bot is Live and Awake!")
 
@@ -126,9 +106,8 @@ async def start_web_server():
 
 # --- APP STARTUP ---
 async def main():
-    # Pehle stable web server start karein 0.0.0.0 par
+    await bot.delete_webhook(drop_pending_updates=True)
     await start_web_server()
-    # Phir Telegram bot start karein
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
