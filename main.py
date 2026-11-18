@@ -1,21 +1,21 @@
 import asyncio
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InputMediaPhoto, InputMediaVideo
+from aiogram.types import InputMediaPhoto
 from aiohttp import web
 import os
 
-# --- 1. Telegram Bot Setup ---
+# --- 1. Bot Setup ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN is required. Please set it in your environment variables.")
+    raise ValueError("BOT_TOKEN missing!")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Memory Dictionary
+# Memory
 user_steps = {}
 
-# --- 2. NYRA PERSONA MEMORY ---
+# --- 2. Persona ---
 persona_details = {
     "name": "Nyra",
     "age": "24",
@@ -26,7 +26,6 @@ persona_details = {
     "relationship": "Well... maine 22 mein shaadi ki thi, but it didn't work out. I guess I'm too independent for some guys. Abhi I'm single and just focusing on myself. Tumhara kya scene hai? 😉",
 }
 
-# --- 3. KEYWORD DETECTION FUNCTION ---
 def check_personal_question(text):
     text = text.lower()
     if any(word in text for word in ["meet", "milna", "milogi", "date", "see you", "video call", "call"]):
@@ -49,14 +48,13 @@ def check_personal_question(text):
         return persona_details['relationship']
     return None
 
-# --- 4. MAIN CHAT HANDLER ---
+# --- 3. Chat Handler ---
 @dp.message()
 @dp.business_message()
 async def smart_seducing_funnel(message: types.Message):
-    # ==== FIX: Bot profile par chup, sirf business account (direct personal number) par reply ====
+    # Bot Profile Ignore
     if message.chat.type == "private" and not getattr(message, 'business_connection_id', None):
         return
-    # ============================================================================================
 
     user_id = message.from_user.id
     text = message.text if message.text else ""
@@ -91,26 +89,23 @@ async def smart_seducing_funnel(message: types.Message):
     else:
         await message.answer("Babe, I'm busy right now. Unlock my exclusive video first if you want more of me... 💋")
 
-# --- 5. STABLE WEB SERVER ---
-async def handle(request):
-    return web.Response(text="Nyra Bot is Live and Awake!")
-
-app = web.Application()
-app.router.add_get('/', handle)
-
-async def start_web_server():
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
-    await site.start()
-
-# --- APP STARTUP ---
-async def main():
+# --- 4. Web Server (Stable Setup) ---
+async def start_bot():
     await bot.delete_webhook(drop_pending_updates=True)
-    # Start the web server task concurrently
-    asyncio.create_task(start_web_server())
-    # Start bot polling
-    await dp.start_polling(bot)
+    asyncio.create_task(dp.start_polling(bot))
+
+async def handle_ping(request):
+    return web.Response(text="Bot is Live!")
+
+def main():
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    
+    # Start bot polling in background BEFORE server starts blocking
+    app.on_startup.append(lambda app: asyncio.create_task(start_bot()))
+    
+    # Start Web Server on Render's Port
+    web.run_app(app, host='0.0.0.0', port=8080)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
