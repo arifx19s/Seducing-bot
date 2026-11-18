@@ -9,7 +9,6 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN is required. Please set it in your environment variables.")
 
-# Bot aur Dispatcher (dp) yahan banaye gaye hain, ab NameError nahi aayega
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
@@ -54,10 +53,10 @@ def check_personal_question(text):
 @dp.message()
 @dp.business_message()
 async def smart_seducing_funnel(message: types.Message):
-    # ==== 1 LINE FIX: Bot profile ko ignore kare aur sirf personal business messages ka reply de ====
+    # ==== FIX: Bot profile par chup, sirf business account (direct personal number) par reply ====
     if message.chat.type == "private" and not getattr(message, 'business_connection_id', None):
         return
-    # =================================================================================================
+    # ============================================================================================
 
     user_id = message.from_user.id
     text = message.text if message.text else ""
@@ -108,7 +107,9 @@ async def start_web_server():
 # --- APP STARTUP ---
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
-    await start_web_server()
+    # Start the web server task concurrently
+    asyncio.create_task(start_web_server())
+    # Start bot polling
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
