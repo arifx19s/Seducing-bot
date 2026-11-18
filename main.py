@@ -52,15 +52,21 @@ def check_personal_question(text):
 @dp.message()
 @dp.business_message()
 async def smart_seducing_funnel(message: types.Message):
-    # Bot Profile Ignore
-    if message.chat.type == "private" and not getattr(message, 'business_connection_id', None):
+    # ==== FIX: Get Business ID and Ignore direct bot profile messages ====
+    b_id = getattr(message, 'business_connection_id', None)
+    if message.chat.type == "private" and not b_id:
         return
 
     user_id = message.from_user.id
     text = message.text if message.text else ""
     step = user_steps.get(user_id, 0)
     
-    await bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    # ==== FIX: Passed business_connection_id so it doesn't crash on typing ====
+    try:
+        await bot.send_chat_action(chat_id=message.chat.id, action="typing", business_connection_id=b_id)
+    except:
+        pass
+    
     await asyncio.sleep(4)
     
     custom_reply = check_personal_question(text)
@@ -79,11 +85,15 @@ async def smart_seducing_funnel(message: types.Message):
         
     elif step == 2:
         await message.answer("I get shy on calls. Here I can be naughty just for u. Like that 🔥")
-        await bot.send_paid_media(
-            chat_id=message.chat.id,
-            star_count=600,
-            media=[InputMediaPhoto(media="https://images.pexels.com/photos/1382734/pexels-photo-1382734.jpeg")]
-        )
+        try:
+            await bot.send_paid_media(
+                chat_id=message.chat.id,
+                star_count=600,
+                media=[InputMediaPhoto(media="https://images.pexels.com/photos/1382734/pexels-photo-1382734.jpeg")],
+                business_connection_id=b_id
+            )
+        except:
+            pass
         user_steps[user_id] = 3
         
     else:
@@ -101,10 +111,8 @@ def main():
     app = web.Application()
     app.router.add_get('/', handle_ping)
     
-    # Start bot polling in background BEFORE server starts blocking
     app.on_startup.append(lambda app: asyncio.create_task(start_bot()))
     
-    # Start Web Server on Render's Port
     web.run_app(app, host='0.0.0.0', port=8080)
 
 if __name__ == "__main__":
