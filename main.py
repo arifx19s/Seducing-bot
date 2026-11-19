@@ -14,8 +14,8 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Har user ki pichli 12 baatein yaad rakhne ke liye memory
 chat_histories = {}
+ACTIVE_MODEL = None
 
 # --- 2. NYRA FULL PERSONA & IMPROVISATION RULES ---
 SYSTEM_PROMPT = """
@@ -38,10 +38,37 @@ STRICT CONVERSATION RULES:
 5. NEVER BREAK CHARACTER: Never admit you are an AI, bot, or assistant. Always respond directly to what the user just said and keep the conversation engaging and seductive.
 """
 
-# --- 3. AI Reply Function (Fixed Timeout) ---
+# --- 3. Auto-Detect Active Groq Model ---
+async def get_active_model(session, headers):
+    global ACTIVE_MODEL
+    if ACTIVE_MODEL:
+        return ACTIVE_MODEL
+
+    async with session.get("https://api.groq.com/openai/v1/models", headers=headers) as resp:
+        data = await resp.json()
+        models = [m["id"] for m in data.get("data", [])]
+
+    # Audio, guard, aur non-chat models ko filter out karein
+    skip_words = ("whisper", "tts", "guard", "embed", "playai", "orpheus", "safeguard")
+    chat_models = [m for m in models if not any(w in m.lower() for w in skip_words)]
+
+    # Sabse behtar available Llama model pick karein
+    for keyword in ("llama-4", "llama-3.3", "70b", "llama-3.1", "llama"):
+        for m in chat_models:
+            if keyword in m.lower():
+                ACTIVE_MODEL = m
+                print(f"Selected Groq Model: {ACTIVE_MODEL}")
+                return ACTIVE_MODEL
+
+    ACTIVE_MODEL = chat_models[0] if chat_models else "llama-3.1-8b-instant"
+    print(f"Selected Groq Model: {ACTIVE_MODEL}")
+    return ACTIVE_MODEL
+
+# --- 4. AI Reply Function ---
 async def get_ai_reply(user_id: int, user_text: str) -> str:
+    global ACTIVE_MODEL
     if not GROQ_API_KEY:
-        print("AI Error: GROQ_API_KEY is missing in Render Environment!")
+        print("AI Error: GROQ_API_KEY is missing!")
         return "Heyy babe, give me a minute 😉"
 
     history = chat_histories.get(user_id, [])
@@ -53,20 +80,22 @@ async def get_ai_reply(user_id: int, user_text: str) -> str:
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
     }
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + history,
-        "temperature": 0.85,
-        "max_tokens": 130
-    }
 
     try:
         timeout = aiohttp.ClientTimeout(total=15)
         async with aiohttp.ClientSession(timeout=timeout) as session:
+            model_name = await get_active_model(session, headers)
+            payload = {
+                "model": model_name,
+                "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + history,
+                "temperature": 0.85,
+                "max_tokens": 130
+            }
             async with session.post(url, headers=headers, json=payload) as resp:
                 data = await resp.json()
                 if resp.status != 200:
                     print(f"Groq API Error ({resp.status}): {data}")
+                    ACTIVE_MODEL = None
                     return "Mmm tell me more about that 😉"
                 reply = data["choices"][0]["message"]["content"].strip()
                 history.append({"role": "assistant", "content": reply})
@@ -76,12 +105,11 @@ async def get_ai_reply(user_id: int, user_text: str) -> str:
         print(f"AI Exception: {e}")
         return "Mmm tell me more about that 😉"
 
-# --- 4. Main Chat Handler (Sirf Personal Business Number ke liye) ---
+# --- 5. Main Chat Handler (Sirf Personal Business Number ke liye) ---
 @dp.message()
 @dp.business_message()
 async def ai_seducing_handler(message: types.Message):
     b_id = getattr(message, 'business_connection_id', None)
-    # Bot ki apni profile par chup rahe, sirf personal number par reply de
     if message.chat.type == "private" and not b_id:
         return
 
@@ -90,7 +118,6 @@ async def ai_seducing_handler(message: types.Message):
 
     user_id = message.from_user.id
 
-    # Natural typing effect
     try:
         await bot.send_chat_action(chat_id=message.chat.id, action="typing", business_connection_id=b_id)
     except Exception:
@@ -101,7 +128,7 @@ async def ai_seducing_handler(message: types.Message):
     reply = await get_ai_reply(user_id, message.text)
     await message.answer(reply)
 
-# --- 5. Web Server (Render + UptimeRobot) ---
+# --- 6. Web Server (Render + UptimeRobot) ---
 async def start_bot():
     await bot.delete_webhook(drop_pending_updates=True)
     asyncio.create_task(dp.start_polling(bot))
