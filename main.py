@@ -1,125 +1,100 @@
 import asyncio
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import InputMediaPhoto
-from aiohttp import web
 import os
+import aiohttp
+from aiohttp import web
+from aiogram import Bot, Dispatcher, types
 
-# --- 1. Bot Setup ---
+# --- 1. Setup ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN missing!")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Memory: User ki stages aur unke naye messages ko track karne ke liye
-user_steps = {}
+# Har user ki pichli 10 baatein yaad rakhne ke liye memory
+chat_histories = {}
 
-# --- 2. Persona Memory ---
-persona_details = {
-    "name": "Nyra",
-    "age": "24",
-    "location": "Dubai, Marina ke pass",
-    "background": "Mere dad American hain aur mom Russian. So, mix of both worlds 😉",
-    "hobbies": "Mujhe traveling, makeup (mera apna brand bhi hai!), aur Marina mein late-night walks bohot pasand hain. Waise tum kya karte ho free time mein? ✨",
-    "profession": "Main ek cosmetic business run karti hoon aur abhi Instagram par focus kar rahi hoon. Ek independent boss babe wali vibe, u know? 💁‍♀️",
-    "relationship": "Well... maine 22 mein shaadi ki thi, but it didn't work out. I guess I'm too independent for some guys. Abhi I'm single and just focusing on myself. Tumhara kya scene hai? 😉",
-}
+# --- 2. NYRA AI PERSONA (System Prompt) ---
+SYSTEM_PROMPT = """
+You are Nyra, a 24-year-old confident, flirty, playful, and seductive woman living near Dubai Marina.
+Background: American dad, Russian mom. You run your own cosmetic brand and focus on Instagram. You were married at 22, now single and independent.
+Rules for replying:
+1. Always reply naturally, directly addressing what the user just said. Never repeat the same generic lines.
+2. Match the user's language (if they speak English, reply in English; if they speak Roman Urdu/Hindi, reply in Roman Urdu). If they ask you to speak English, switch to English immediately.
+3. Keep replies short (1 to 2 sentences max), casual, teasing, and seductive—like a real girl texting on Telegram, not a formal AI. Use emojis naturally (😉, 🔥, 💋, 😈) but don't overdo it.
+4. If they ask to meet or video call, playfully tease them that you're shy on calls / don't meet strangers right away and prefer keeping things exclusive and naughty here in chat first.
+5. Never admit you are an AI or a bot. Stay in character 100% of the time.
+"""
 
-# --- 3. Smart Question Detector ---
-def check_personal_question(text):
-    text = text.lower()
-    if any(word in text for word in ["meet", "milna", "milogi", "date", "see you", "video call", "call"]):
-        return "I don't just meet guys from the internet right away, baby. I need to know you're real and worth my time first. 😉 Plus, I like keeping some things exclusive online for now. 🔥"
-    if any(word in text for word in ["fuck", "sex", "nudes", "boobs", "ass", "hot"]):
-        return "Mmm you're bold today 🙈 I like that. But I need to know where you're from first, you keep ignoring me"
-    if any(word in text for word in ["nam", "name", "naam", "who are you"]):
-        return f"Mera naam {persona_details['name']} hai! Aur tumhara? ❤️"
-    if any(word in text for word in ["age", "umar", "old"]):
-        return f"Main {persona_details['age']} saal ki hoon. Tum kitne bade ho? 😉"
-    if any(word in text for word in ["kaha", "location", "where", "city", "rehti"]):
-        return f"Main {persona_details['location']} rehti hoon, it's beautiful here! Tum kahan se ho? ✨"
-    if any(word in text for word in ["country", "american", "russian", "mom", "dad", "parents", "background"]):
-        return persona_details['background']
-    if any(word in text for word in ["hobby", "hobbies", "free time", "shouq", "nothing", "kuch nahi"]):
-        return persona_details['hobbies']
-    if any(word in text for word in ["work", "job", "profession", "kya karti", "business", "service", "services", "menu"]):
-        return f"Heyy Handsome 😘 {persona_details['profession']} As for services, I don't do like a list of stuff lol. What are you looking for? I can't do customs right now but I have something hot for you if you're ready 👀"
-    if any(word in text for word in ["boyfriend", "single", "relationship", "mingle", "married", "husband", "shaadi", "divorce"]):
-        return persona_details['relationship']
-    if any(word in text for word in ["cute", "beautiful", "pretty", "gorgeous", "wow"]):
-        return "Aww thank you baby ❤️ u know how to make a girl smile."
-    if any(word in text for word in ["no", "na", "nahi"]):
-        return "Why not? You shy? 😉"
-    if any(word in text for word in ["hmm", "ok", "acha", "yes", "han", "haan"]):
-        return "You're a man of few words, huh? I like mysterious guys... 💋"
-    return None
+# --- 3. AI Reply Function ---
+async def get_ai_reply(user_id: int, user_text: str) -> str:
+    if not GROQ_API_KEY:
+        return "Heyy babe, give me a minute 😉"
 
-# --- 4. Main Chat Handler ---
+    history = chat_histories.get(user_id, [])
+    history.append({"role": "user", "content": user_text})
+    # Sirf aakhri 10 messages rakhein taake fast aur smart rahe
+    history = history[-10:]
+
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + history,
+        "temperature": 0.85,
+        "max_tokens": 120
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload, timeout=15) as resp:
+                data = await resp.json()
+                reply = data["choices"][0]["message"]["content"].strip()
+                history.append({"role": "assistant", "content": reply})
+                chat_histories[user_id] = history[-10:]
+                return reply
+    except Exception as e:
+        print(f"AI Error: {e}")
+        return "Mmm tell me more about that 😉"
+
+# --- 4. Main Chat Handler (Sirf Personal Business Number ke liye) ---
 @dp.message()
 @dp.business_message()
-async def smart_seducing_funnel(message: types.Message):
-    # Sirf Business Account par chalay
+async def ai_seducing_handler(message: types.Message):
     b_id = getattr(message, 'business_connection_id', None)
+    # Bot ki apni profile par chup rahe, sirf personal number par reply de
     if message.chat.type == "private" and not b_id:
         return
 
+    if not message.text:
+        return
+
     user_id = message.from_user.id
-    text = message.text if message.text else ""
-    step = user_steps.get(user_id, 0)
-    
-    # Typing Effect
+
+    # Natural typing effect
     try:
         await bot.send_chat_action(chat_id=message.chat.id, action="typing", business_connection_id=b_id)
     except:
         pass
-    
-    await asyncio.sleep(4)
-    
-    # Pehle Dekhe ke koi smart sawal pucha hai ya reply diya hai?
-    custom_reply = check_personal_question(text)
-    if custom_reply:
-        await message.answer(custom_reply)
-        return  # Yahan ruk jayega aur agli stupid line nahi bheje ga
 
-    # Agar normal baatein kar raha hai to Seducing Funnel (Step by Step)
-    if step == 0:
-        await message.answer("Hey there! How are you doing? 😉")
-        user_steps[user_id] = 1
-        
-    elif step == 1:
-        await message.answer("Good boy. I've got something waiting for you, don't keep me waiting too long 😈")
-        # YAHAN APNI PASAND KI REAL NYRA IMAGE KA LINK LAGAYEN:
-        real_image = "https://images.pexels.com/photos/1036623/pexels-photo-1036623.jpeg" 
-        await message.answer_photo(photo=real_image) 
-        user_steps[user_id] = 2
-        
-    elif step == 2:
-        await message.answer("I get shy on calls. Here I can be naughty just for u. Like that 🔥")
-        # YAHAN PAID CONTENT KI REAL IMAGE LAGAYEN:
-        paid_image = "https://images.pexels.com/photos/2082260/pexels-photo-2082260.jpeg"
-        try:
-            await bot.send_paid_media(
-                chat_id=message.chat.id,
-                star_count=600,
-                media=[InputMediaPhoto(media=paid_image)],
-                business_connection_id=b_id
-            )
-        except:
-            pass
-        user_steps[user_id] = 3
-        
-    else:
-        # Step 3 ke baad bar bar wahi na dohraaye, bs ye bhej de.
-        await message.answer("Babe, I'm busy right now. Unlock my exclusive video first if you want more of me... 💋")
+    await asyncio.sleep(3)
 
-# --- 5. Web Server (Stable Setup) ---
+    reply = await get_ai_reply(user_id, message.text)
+    await message.answer(reply)
+
+# --- 5. Web Server (Render + UptimeRobot) ---
 async def start_bot():
     await bot.delete_webhook(drop_pending_updates=True)
     asyncio.create_task(dp.start_polling(bot))
 
 async def handle_ping(request):
-    return web.Response(text="Bot is Live!")
+    return web.Response(text="Nyra AI Bot is Live!")
 
 def main():
     app = web.Application()
