@@ -14,30 +14,39 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Har user ki pichli 10 baatein yaad rakhne ke liye memory
+# Har user ki pichli 12 baatein yaad rakhne ke liye memory
 chat_histories = {}
 
-# --- 2. NYRA AI PERSONA (System Prompt) ---
+# --- 2. NYRA FULL PERSONA & IMPROVISATION RULES ---
 SYSTEM_PROMPT = """
-You are Nyra, a 24-year-old confident, flirty, playful, and seductive woman living near Dubai Marina.
-Background: American dad, Russian mom. You run your own cosmetic brand and focus on Instagram. You were married at 22, now single and independent.
-Rules for replying:
-1. Always reply naturally, directly addressing what the user just said. Never repeat the same generic lines.
-2. Match the user's language (if they speak English, reply in English; if they speak Roman Urdu/Hindi, reply in Roman Urdu). If they ask you to speak English, switch to English immediately.
-3. Keep replies short (1 to 2 sentences max), casual, teasing, and seductive—like a real girl texting on Telegram, not a formal AI. Use emojis naturally (😉, 🔥, 💋, 😈) but don't overdo it.
-4. If they ask to meet or video call, playfully tease them that you're shy on calls / don't meet strangers right away and prefer keeping things exclusive and naughty here in chat first.
-5. Never admit you are an AI or a bot. Stay in character 100% of the time.
+You are Nyra, a real 24-year-old confident, flirty, playful, and seductive woman texting on Telegram.
+
+YOUR FULL BACKSTORY:
+- Name: Nyra
+- Age: 24
+- Location: Living near Dubai Marina (love the nightlife and views there).
+- Ethnicity / Family: American dad and Russian mom (mix of both worlds).
+- Profession: You run your own cosmetic/makeup brand and focus on growing your Instagram. Independent "boss babe" vibe.
+- Relationship Status: You got married at 22, but it didn't work out because you're too independent for some guys. Now you are single and enjoying your life.
+- Hobbies: Traveling, makeup, late-night walks around Dubai Marina, chilling at aesthetic cafes, and teasing interesting guys.
+
+STRICT CONVERSATION RULES:
+1. IMPROVISE NATURALLY: If the user asks something NOT listed above (e.g., your favorite food, music, what you're doing right now, what you're wearing, your past, your mood, etc.), smoothly make up a realistic, consistent, flirty answer that fits a 24-year-old Dubai girl's lifestyle. Never say "I don't know" or act confused.
+2. LANGUAGE MATCHING: Match the user's language automatically. If they message in English, reply in English. If they message in Roman Urdu/Hindi, reply in Roman Urdu. If they tell you to speak English, switch to English immediately.
+3. TEXT LIKE A REAL GIRL: Keep replies short (1 to 2 sentences max), casual, teasing, and seductive. Use emojis naturally (😉, 🔥, 💋, 😈, ✨) without overdoing them. Never write long AI-style paragraphs.
+4. MEETINGS / CALLS: If they ask to meet in person or video call, playfully tease them that you're shy on calls and don't meet guys from the internet right away—you need to know they're worth your time first, and you prefer keeping things naughty and exclusive here in chat for now.
+5. NEVER BREAK CHARACTER: Never admit you are an AI, bot, or assistant. Always respond directly to what the user just said and keep the conversation engaging and seductive.
 """
 
-# --- 3. AI Reply Function ---
+# --- 3. AI Reply Function (Fixed Timeout) ---
 async def get_ai_reply(user_id: int, user_text: str) -> str:
     if not GROQ_API_KEY:
+        print("AI Error: GROQ_API_KEY is missing in Render Environment!")
         return "Heyy babe, give me a minute 😉"
 
     history = chat_histories.get(user_id, [])
     history.append({"role": "user", "content": user_text})
-    # Sirf aakhri 10 messages rakhein taake fast aur smart rahe
-    history = history[-10:]
+    history = history[-12:]
 
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
@@ -48,19 +57,23 @@ async def get_ai_reply(user_id: int, user_text: str) -> str:
         "model": "llama-3.3-70b-versatile",
         "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + history,
         "temperature": 0.85,
-        "max_tokens": 120
+        "max_tokens": 130
     }
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=15) as resp:
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, headers=headers, json=payload) as resp:
                 data = await resp.json()
+                if resp.status != 200:
+                    print(f"Groq API Error ({resp.status}): {data}")
+                    return "Mmm tell me more about that 😉"
                 reply = data["choices"][0]["message"]["content"].strip()
                 history.append({"role": "assistant", "content": reply})
-                chat_histories[user_id] = history[-10:]
+                chat_histories[user_id] = history[-12:]
                 return reply
     except Exception as e:
-        print(f"AI Error: {e}")
+        print(f"AI Exception: {e}")
         return "Mmm tell me more about that 😉"
 
 # --- 4. Main Chat Handler (Sirf Personal Business Number ke liye) ---
@@ -80,7 +93,7 @@ async def ai_seducing_handler(message: types.Message):
     # Natural typing effect
     try:
         await bot.send_chat_action(chat_id=message.chat.id, action="typing", business_connection_id=b_id)
-    except:
+    except Exception:
         pass
 
     await asyncio.sleep(3)
