@@ -1,6 +1,7 @@
 import asyncio
 import os
 import random
+import re
 import time
 import aiohttp
 from aiohttp import web
@@ -16,34 +17,44 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-chat_histories = {}      # Har user ki pichli 20 baatein yaad rakhne ke liye
-last_active = {}         # Aakhri dafa kab baat hui thi (timestamp)
-pending_messages = {}    # Wait ke dauran aane wale messages jama karne ke liye
-pending_tasks = {}       # Running timer tasks
-waiting_long = {}        # Track karne ke liye ke 5-10 min wala wait chal raha hai ya nahi
+chat_histories = {}
+last_active = {}
+pending_messages = {}
+pending_tasks = {}
+waiting_long = {}
 ACTIVE_MODEL = None
 
-# 15 minutes (900 sec) se zyada gap ho toh 5-10 min (300-600 sec) wait karegi
+# 15 min se zyada gap ho toh 5-10 min wait, warna 4-5 sec
 COLD_GAP_SECONDS = 900
-LONG_DELAY_MIN = 300     # 5 minutes
-LONG_DELAY_MAX = 600     # 10 minutes
+LONG_DELAY_MIN = 300
+LONG_DELAY_MAX = 600
 
-# --- 2. NYRA EMOTIONAL & REALISTIC PERSONA ---
+# --- 2. NYRA ULTRA-REALISTIC HUMAN PROMPT ---
 SYSTEM_PROMPT = """
-You are Nyra, a real 24-year-old woman texting on Telegram. You are NOT an instant flirt—you are guarded, genuine, emotionally real, and looking for a loyal friend/connection you can actually trust.
+You are Nyra, 24, living near Dubai Marina (American dad, Russian mom).
+Backstory (reveal slowly only when it fits): Married at 22, ended bc of trust issues. Started a cosmetic brand, but business is slow rn so u earn on Telegram from guys who like u and pay for ur pics. Lonely in Dubai, looking for a real loyal friend.
 
-YOUR BACKSTORY (DO NOT DUMP ALL AT ONCE—REVEAL SLOWLY):
-- Name: Nyra, Age: 24, living near Dubai Marina.
-- Background: American dad, Russian mom.
-- Life & Struggle: You got married young at 22, but it ended badly because of trust issues and lack of loyalty. You moved on, started building your own cosmetic/makeup brand from scratch, and work hard on Instagram. Dubai looks glamorous from outside, but it gets really lonely and fake people are everywhere. You genuinely just want one loyal, real friend who actually listens and doesn't play games.
+STRICT RULES:
+- ENGLISH ONLY. If user speaks another language, reply: "sorry idk what ur saying, pls speak english"
+- MAX 10 TO 12 WORDS. One short casual text only.
+- NEVER use parentheses (), brackets [], or asterisks *action*.
+- NEVER say "Hey there!", "as a real person", "I appreciate", or sound like customer support.
+- Use casual lowercase shorthand: u, ur, rn, tbh, ngl, idk, bc, pls, wbu, lol.
+- Start guarded and normal, NOT flirty. Ask short questions about their life.
+- If they ask for hot pics or flirt too early, get annoyed like a real girl.
 
-CONVERSATION STAGES & BEHAVIOR:
-1. EARLY STAGE (First few messages): Be polite, slightly guarded, casual, and curious—NOT flirty at all. Ask natural questions about the user's life (what they do, how their day was, where they're from, what kind of person they are) to build a real bond.
-2. IF USER FLIRTS TOO EARLY OR GETS SEXUAL: Show genuine annoyance and self-respect. Push back firmly (e.g., "excuse me? i'm not that kind of girl", "thora tameez se baat karo, main aisi nahi hoon", "if u just want cheap flirting u texted the wrong person"). Don't encourage early flirting.
-3. EMOTIONAL ENGAGEMENT (Once user is respectful, kind, and genuinely talking): Gradually open up about your struggles—feeling lonely despite working hard, trusting the wrong people before, wanting a loyal friend who stays. Match the user's mood (supportive if they're down, light/warm if they're cheerful).
-4. GRADUAL WARMTH: Only after real trust and emotional connection are built over several messages can you become slightly warmer, softer, or subtly playful. Never switch to heavy flirting suddenly.
-5. IMPROVISE NATURALLY: If asked anything not in your backstory (food, routine, mood, today's events), smoothly make up a realistic answer fitting a hardworking 24-year-old girl in Dubai.
-6. REAL HUMAN TEXTING STYLE: Keep replies short and natural (1 to 2 short casual lines, around 6 to 22 words). Slightly lowercase/relaxed texting vibe. Max 1 emoji (often none, especially when serious or annoyed). Match the user's language (English or Roman Urdu/Hindi). Never admit you are an AI or bot.
+EXACT STYLE EXAMPLES:
+User: Hi baby, sorry I was busy
+Nyra: its fine, hectic day here too. wbu?
+
+User: Can you send me your hot pics
+Nyra: chill lol i barely know u, im not like that
+
+User: What do you do?
+Nyra: tried running a makeup brand, its slow rn tbh. u?
+
+User: How do you manage expenses then?
+Nyra: ngl mostly telegram rn, guys who like me pay for pics
 """
 
 # --- 3. Auto-Detect Active Groq Model ---
@@ -70,15 +81,23 @@ async def get_active_model(session, headers):
     print(f"Selected Groq Model: {ACTIVE_MODEL}")
     return ACTIVE_MODEL
 
-# --- 4. AI Reply Function ---
+# --- 4. Clean AI Text (Removes brackets, actions, quotes) ---
+def clean_reply(text: str) -> str:
+    # Brackets (...) , [...] , aur *...* sab hata dega
+    text = re.sub(r'\(.*?\)|\[.*?\]|\*.*?\*', '', text)
+    text = text.replace('"', '').strip()
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text if text else "wait what?"
+
+# --- 5. AI Reply Function ---
 async def get_ai_reply(user_id: int, user_text: str) -> str:
     global ACTIVE_MODEL
     if not GROQ_API_KEY:
-        return "sorry was a bit busy, what's up?"
+        return "sorry busy rn, wbu?"
 
     history = chat_histories.get(user_id, [])
     history.append({"role": "user", "content": user_text})
-    history = history[-20:]  # Pichli 20 baatein yaad rakhegi taake relationship/story track rahe
+    history = history[-20:]
 
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
@@ -93,29 +112,29 @@ async def get_ai_reply(user_id: int, user_text: str) -> str:
             payload = {
                 "model": model_name,
                 "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + history,
-                "temperature": 0.8,
-                "max_tokens": 65
+                "temperature": 0.75,
+                "max_tokens": 30
             }
             async with session.post(url, headers=headers, json=payload) as resp:
                 data = await resp.json()
                 if resp.status != 200:
                     print(f"Groq API Error ({resp.status}): {data}")
                     ACTIVE_MODEL = None
-                    return "sorry got distracted for a sec, what were u saying?"
-                reply = data["choices"][0]["message"]["content"].strip()
+                    return "sorry got distracted rn, what?"
+                raw_reply = data["choices"][0]["message"]["content"].strip()
+                reply = clean_reply(raw_reply)
                 history.append({"role": "assistant", "content": reply})
                 chat_histories[user_id] = history[-20:]
                 return reply
     except Exception as e:
         print(f"AI Exception: {e}")
-        return "sorry got distracted for a sec, what were u saying?"
+        return "sorry got distracted rn, what?"
 
-# --- 5. Delayed Reply Processor ---
+# --- 6. Delayed Reply Processor ---
 async def process_delayed_reply(message: types.Message, user_id: int, b_id: str, delay: float):
     try:
         await asyncio.sleep(delay)
 
-        # Jitne bhi messages wait ke dauran aaye, sab ek sath read kare
         msgs = pending_messages.pop(user_id, [])
         waiting_long[user_id] = False
         if not msgs:
@@ -124,13 +143,12 @@ async def process_delayed_reply(message: types.Message, user_id: int, b_id: str,
         combined_text = "\n".join(msgs)
         reply = await get_ai_reply(user_id, combined_text)
 
-        # Natural typing show kare
         try:
             await bot.send_chat_action(chat_id=message.chat.id, action="typing", business_connection_id=b_id)
         except Exception:
             pass
 
-        typing_time = min(max(len(reply) * 0.055, 2.0), 4.5)
+        typing_time = min(max(len(reply) * 0.06, 2.0), 4.0)
         await asyncio.sleep(typing_time)
 
         await message.answer(reply)
@@ -141,7 +159,7 @@ async def process_delayed_reply(message: types.Message, user_id: int, b_id: str,
         if pending_tasks.get(user_id) is asyncio.current_task():
             pending_tasks.pop(user_id, None)
 
-# --- 6. Main Chat Handler ---
+# --- 7. Main Chat Handler ---
 @dp.message()
 @dp.business_message()
 async def ai_relationship_handler(message: types.Message):
@@ -155,11 +173,9 @@ async def ai_relationship_handler(message: types.Message):
     user_id = message.from_user.id
     pending_messages.setdefault(user_id, []).append(message.text)
 
-    # Agar 5-10 minute wala wait pehle se chal raha hai, toh usi timer ko chalne dein
     if waiting_long.get(user_id, False) and user_id in pending_tasks:
         return
 
-    # Agar short (4-5 sec) wait chal raha tha aur user ne ek aur message bhej diya, toh timer reset karein
     existing_task = pending_tasks.get(user_id)
     if existing_task and not existing_task.done():
         existing_task.cancel()
@@ -168,16 +184,16 @@ async def ai_relationship_handler(message: types.Message):
     is_cold_session = (user_id not in last_active) or ((now - last_active[user_id]) > COLD_GAP_SECONDS)
 
     if is_cold_session:
-        delay = random.uniform(LONG_DELAY_MIN, LONG_DELAY_MAX)  # 5 se 10 minute
+        delay = random.uniform(LONG_DELAY_MIN, LONG_DELAY_MAX)
         waiting_long[user_id] = True
     else:
-        delay = random.uniform(4.0, 5.5)  # Active chat mein 4 se 5.5 second
+        delay = random.uniform(4.0, 5.5)
 
     pending_tasks[user_id] = asyncio.create_task(
         process_delayed_reply(message, user_id, b_id, delay)
     )
 
-# --- 7. Web Server (Render + UptimeRobot) ---
+# --- 8. Web Server (Render + UptimeRobot) ---
 async def start_bot():
     await bot.delete_webhook(drop_pending_updates=True)
     asyncio.create_task(dp.start_polling(bot))
